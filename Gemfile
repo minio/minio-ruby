@@ -1,5 +1,4 @@
 source 'https://rubygems.org'
 
-# Specify your gem's dependencies in minio.gemspec
-gem "http"
-gemspec
+gemspec path: 'minio'
+gem 'rake', require: false

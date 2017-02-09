@@ -1,8 +1,10 @@
-## Minio Ruby Library for Amazon S3 Compatible Cloud Storage[![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/Minio/minio?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+# Minio Client SDK for Ruby [![Slack](https://slack.minio.io/slack?type=svg)](https://slack.minio.io)
 
-The Minio Ruby Client SDK provides simple APIs to access any Amazon S3 compatible object storage server.
+The Minio Client SDK for Ruby provides simple APIs to access Minio or any Amazon S3 compatible object storage server.
 
-The Minio Ruby SDK is work in progress. Please do not use it in development or production. 
+<blockquote>
+The Minio Ruby SDK is work in progress. Please do not use it in development or production.
+</blockquote>
 
 ## Installation
 
@@ -12,35 +14,32 @@ Add this line to your application's Gemfile:
 gem 'minio'
 ```
 
-And then execute:
+And then execute to install the deps.
 
-    $ bundle
+```
+bundle
+```
 
 Or install it yourself as:
 
-    $ gem install minio
-
-# Development
-To build the minio gem do
-```sh
-$ gem build minio.gemspec
+```
+gem install minio
 ```
 
-Install the gem with 
+## Development
+
+To build the minio gem yourself
+
 ```sh
- $ gem install minio
+bundle exec rake gems:build
 ```
 
-### Testing
-Tests cases are being written. Testing can be done with irb.
+Install the built gem file.
+
 ```sh
-$ irb
-2.2.2 :001 > require "minio"
- => true 
-2.2.2 :002 > quit 
+gem install minio-0.0.1.gem
 ```
 
 ## Contributing
 
-Bug reports and pull requests are welcome on GitHub at https://github.com/[USERNAME]/minio. This project is intended to be a safe, welcoming space for collaboration, and contributors are expected to adhere to the [Contributor Covenant](contributor-covenant.org) code of conduct.
-
+[Contributors Guide](https://github.com/minio/minio-ruby/blob/master/CONTRIBUTING.md)
