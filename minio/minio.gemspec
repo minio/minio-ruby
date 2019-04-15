@@ -17,5 +17,10 @@ Gem::Specification.new do |spec|
   spec.files  = Dir['lib/**/*.rb']
   spec.bindir = 'bin'
 
-  spec.add_dependency('http', '~> 2.0')
+  spec.add_dependency('rest-client')
+  spec.add_dependency('nokogiri')
+
+  spec.add_development_dependency('rspec')
+  spec.add_development_dependency('rubocop')
+  spec.add_development_dependency('pry')
 end

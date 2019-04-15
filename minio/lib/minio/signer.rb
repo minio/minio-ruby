@@ -1,169 +1,186 @@
-
-require "openssl"
-require "time"
-require "uri"
-require "pathname"
-require "minio/digest"
+# frozen_string_literal: true
 
 module MinioRuby
-	class Signer
-	    RFC8601BASIC = "%Y%m%dT%H%M%SZ"
-	    SIGNV4ALGO = 'AWS4-HMAC-SHA256'
-	    attr_reader :access_key, :secret_key, :region, :date, :service
-	    attr_reader :method, :uri, :headers
+  class Signer
+    extend Forwardable
+    def_delegators :@config, :service, :region
+    def_delegators :@config, :secret_key, :access_key
 
-	    # Initialize signer for calculating your signature.
-	    # Params:
-	    # +config+: configuration data with access keys and region.
-	    def initialize(config)
-	      @access_key = config[:access_key] || config["access_key"]
-	      @secret_key = config[:secret_key] || config["secret_key"]
-	      @region = config[:region] || config["region"]
-	      @date = Time.now.utc.strftime(RFC8601BASIC)
-	      @service = "s3"      
-	    end
-
-	    # Signature v4 function returns back headers with Authorization header.
-	    # Params:
-	    # +method+: http method.
-	    # +endpoint+: S3 endpoint URL.
-	    def sign_v4(method, endpoint, headers, body = nil, debug = false)
-	      @method = method.upcase
-	      @endpoint = endpoint
-	      @headers = headers
-	      @uri = URI(endpoint)
-          
-          puts "EP : "+@endpoint
-          puts "Headers : "+@headers.to_s
-          
-	      headers["X-Amz-Date"] = date
-          headers["X-Amz-Content-Sha256"] = Digestor.hexdigest(body || "")
-         
-          
-	      headers["Host"] = get_host(@uri)
-          puts "--->" + get_host(@uri)
-           
-          
-	      dump if debug
-	      signed_headers = headers.dup
-
-	      signed_headers['Authorization'] = get_authorization(headers)
-	      signed_headers
-	    end
-
-	    private
-
-	    # Get host header value from endpoint.
-	    # Params:
-	    # +endpoint+: endpoint URI object.
-	    def get_host(endpoint)
-          puts "recieved : "+ endpoint.to_s
-          puts "port : "+ endpoint.port.to_s    
-	      if endpoint.port  
-            if ((endpoint.port == 443) || (endpoint.port == 80)) 
-	             return endpoint.host 
-            else
-                return endpoint.host + ":" + endpoint.port.to_s 
-            end    
-	      else
-	        #return endpoint.host
-            return endpoint.host + ":" + endpoint.port.to_s 
-	      end
-	    end
-        
-	     
-        
-        
-
-	    # Get authorization header value.
-	    # Params:
-	    # +headers+: list of headers supplied for the request.
-	    def get_authorization(headers)
-	      [
-	        "AWS4-HMAC-SHA256 Credential=#{access_key}/#{credential_scope}",
-	        "SignedHeaders=#{headers.keys.map(&:downcase).sort.join(";")}",
-	        "Signature=#{signature}"
-	      ].join(', ')
-	    end
-
-	    # Calculate HMAC based signature in following format.
-	    # --- format ---
-	    # kSecret = Your AWS Secret Access Key 
-	    # kDate = HMAC("AWS4" + kSecret, Date)
-	    # kRegion = HMAC(kDate, Region)
-	    # kService = HMAC(kRegion, Service)
-	    # kSigning = HMAC(kService, "aws4_request")
-	    # --------------
-	    def signature
-	      k_date = Digestor.hmac("AWS4" + secret_key, date[0,8])
-	      k_region = Digestor.hmac(k_date, region)
-	      k_service = Digestor.hmac(k_region, service)
-	      k_credentials = Digestor.hmac(k_service, "aws4_request")
-	      Digestor.hexhmac(k_credentials, string_to_sign)
-	    end
-
-	    # Generate string to sign.
-	    # --- format ---
-	    # StringToSign  =
-	    #  Algorithm + '\n' +
-	    #  RequestDate + '\n' +
-	    #  CredentialScope + '\n' +
-	    #  HashedCanonicalRequest
-	    # --------------
-	    def string_to_sign
-	      [
-	        SIGNV4ALGO,
-	        date,
-	        credential_scope,
-	        Digestor.hexdigest(canonical_request)
-	      ].join("\n")
-	    end
-
-	    # Generate credential scope.
-	    # --- format ---
-	    # <mmddyyyy>/<region>/<service>/aws4_request
-	    # --------------
-	    def credential_scope
-	      [
-	        date[0,8],
-	        region,
-	        service,
-	        "aws4_request"
-	      ].join("/")
-	    end
-
-	    # Generate a canonical request of following style.
-	    # --- format ---
-	    # canonicalRequest =
-	    #  <HTTPMethod>\n
-	    #  <CanonicalURI>\n
-	    #  <CanonicalQueryString>\n
-	    #  <CanonicalHeaders>\n
-	    #  <SignedHeaders>\n
-	    #  <HashedPayload>
-	    # --------------
-	    def canonical_request
-	      [
-	        method,
-	        Pathname.new(uri.path).cleanpath.to_s,
-	        uri.query,
-	        headers.sort.map {|k, v| [k.downcase,v.strip].join(':')}.join("\n") + "\n",
-	        headers.sort.map {|k, v| k.downcase}.join(";"),
-	        headers["X-Amz-Content-Sha256"]
-	      ].join("\n")
-	    end
-
-	     def dump
-          puts "-----------------DUMP BEGIN ---------------------"     
-      	  puts "string to sign"
-     	  puts string_to_sign
-	      puts "canonical_request"
-	      puts canonical_request
-	      puts "authorization"
-          puts "-----------------DUMP END ----------------------"
+    def initialize(config:, **options)
+      @config = config
+      @options = options
     end
-	  end
 
-	   
+    def sign_request(http_method:, url:, headers: {}, **request)
+      http_method = extract_http_method(http_method)
+      url = extract_url(url)
+      headers = downcase_headers(headers)
 
-end	
+      datetime = headers['x-amz-date']
+      datetime ||= Time.now.utc.iso8601.gsub(/\W/, '')
+      date = datetime[0, 8]
+
+      content_sha256 = headers['x-amz-content-sha256']
+      content_sha256 ||= sha256_hexdigest(request[:body] || '')
+
+      sigv4_headers = {}
+      sigv4_headers['host'] = Utils.host(url)
+      sigv4_headers['x-amz-date'] = datetime
+      sigv4_headers['x-amz-content-sha256'] ||= content_sha256 if apply_checksum_header?
+      sigv4_headers['content-type'] ||= headers['content-type'] if headers['content-type']
+
+      headers = headers.merge(sigv4_headers)
+      signature = compute_signature(http_method: http_method, url: url, headers: headers, content_sha: content_sha256, datetime: datetime)
+      sigv4_headers['authorization'] = signature_header(date: date, headers: headers, signature: signature)
+
+      Signature.new(headers: sigv4_headers)
+    end
+
+    private
+
+    def extract_http_method(http_method)
+      if http_method
+        http_method.to_s.upcase
+      else
+        msg = 'missing required option :http_method'
+        raise MissingHttpMethodError, msg
+      end
+    end
+
+    def extract_url(url)
+      if url
+        URI.parse(url.to_s)
+      else
+        msg = 'missing required option :url'
+        raise MissingUrlError, msg
+      end
+    end
+
+    def downcase_headers(headers)
+      headers.to_h.each_with_object({}) do |(key, value), acc|
+        acc[key.to_s.downcase] = value
+      end
+    end
+
+    def apply_checksum_header?
+      @options[:apply_checksum_header] != false
+    end
+
+    def compute_signature(http_method:, url:, headers:, content_sha:, datetime:)
+      request = canonical_request(http_method, url, headers, content_sha)
+      to_sign = string_to_sign(datetime, request)
+
+      Digestor.signature(
+        secret_key: secret_key,
+        service: service,
+        region: region,
+        date: datetime[0, 8],
+        string_to_sign: to_sign
+      )
+    end
+
+    def signature_header(date:, headers:, signature:)
+      [
+        "AWS4-HMAC-SHA256 Credential=#{credential(access_key, date)}",
+        "SignedHeaders=#{signed_headers(headers)}",
+        "Signature=#{signature}"
+      ].join(', ')
+    end
+
+    def canonical_request(http_method, url, headers, content_sha256)
+      [
+        http_method,
+        path(url),
+        normalized_querystring(url.query || ''),
+        canonical_headers(headers) + "\n",
+        signed_headers(headers),
+        content_sha256
+      ].join("\n")
+    end
+
+    def string_to_sign(datetime, canonical_request)
+      [
+        'AWS4-HMAC-SHA256',
+        datetime,
+        credential_scope(datetime[0, 8]),
+        sha256_hexdigest(canonical_request)
+      ].join("\n")
+    end
+
+    def credential_scope(date)
+      [
+        date,
+        region,
+        service,
+        'aws4_request'
+      ].join('/')
+    end
+
+    def credential(access_key, date)
+      "#{access_key}/#{credential_scope(date)}"
+    end
+
+    def path(url)
+      path = url.path || '/'
+
+      uri_escape_path(path)
+    end
+
+    def normalized_querystring(querystring)
+      params = querystring.split('&')
+      params = params.map { |p| /=/.match?(p) ? p : p + '=' }
+      params.each.with_index.sort do |a, b|
+        a, a_offset = a
+        a_name = a.split('=')[0]
+        b, b_offset = b
+        b_name = b.split('=')[0]
+        if a_name == b_name
+          a_offset <=> b_offset
+        else
+          a_name <=> b_name
+        end
+      end.map(&:first).join('&')
+    end
+
+    def signed_headers(headers)
+      headers
+        .keys
+        .reject { |header| unsigned_headers.include?(header) }
+        .sort
+        .join(';')
+    end
+
+    def canonical_headers(headers)
+      headers
+        .reject { |header, _value| unsigned_headers.include?(header) }
+        .to_a
+        .sort_by(&:first)
+        .map { |k, v| "#{k}:#{canonical_header_value(v.to_s)}" }
+        .join("\n")
+    end
+
+    def unsigned_headers
+      @unsigned_headers ||= Set
+                            .new(@options.fetch(:unsigned_headers, []))
+                            .map(&:downcase)
+                            .push('authorization')
+                            .push('x-amzn-trace-id')
+    end
+
+    def canonical_header_value(value)
+      /^".*"$/.match?(value) ? value : value.gsub(/\s+/, ' ').strip
+    end
+
+    def sha256_hexdigest(value)
+      Digestor.hexdigest(value)
+    end
+
+    def uri_escape(string)
+      Utils.uri_escape(string)
+    end
+
+    def uri_escape_path(string)
+      Utils.uri_escape_path(string)
+    end
+  end
+end
